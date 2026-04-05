@@ -177,9 +177,10 @@
       font-size: 11px; padding: 2px 7px; border-radius: 12px;
       background: #dce8fd; color: var(--primary-light);
     }
-    .tag.loc  { background: #fef0d8; color: #9a5200; }
-    .tag.subj { background: #dff3e0; color: #1a6e1a; }
-    .tag.box  { background: #f2eaff; color: #5c2ea0; }
+    .tag.loc   { background: #fef0d8; color: #9a5200; }
+    .tag.subj  { background: #dff3e0; color: #1a6e1a; }
+    .tag.box   { background: #f2eaff; color: #5c2ea0; }
+    .tag.owner { background: #fde8e8; color: #8b0000; }
 
     .empty {
       flex: 1; display: flex; flex-direction: column;
@@ -443,6 +444,19 @@
     </div>
 
     <div class="xcard">
+      <h2>📥 Restore / Transfer to Another Device</h2>
+      <p>To move your catalog to an iPad (or any other device): tap <strong>Export Full Catalog</strong> above, AirDrop or iCloud the CSV to the other device, open the app there, then import it here.</p>
+      <p><strong>Merge</strong> adds new books and skips any ISBNs already in the catalog. <strong>Replace</strong> wipes the current catalog first — use this for a clean transfer to a fresh device.</p>
+      <label for="restore-file" class="file-label">📂 Choose full catalog CSV…</label>
+      <input type="file" id="restore-file" accept=".csv" onchange="onRestoreFile()">
+      <div id="rf-name"></div>
+      <div class="two-col">
+        <button class="btn-s" onclick="restoreCatalog('merge')">Merge (add new)</button>
+        <button class="btn-s" onclick="restoreCatalog('replace')">Replace all</button>
+      </div>
+    </div>
+
+    <div class="xcard">
       <h2>⚠️ Danger Zone</h2>
       <p>Permanently delete ALL books from this catalog. This cannot be undone.</p>
       <button class="btn-s btn-danger" onclick="clearAllBooks()">Delete Entire Catalog…</button>
@@ -493,6 +507,7 @@
       <div class="fsec">
         <div class="fsec-title">My Catalog Fields</div>
 
+        <!-- Row 1: Location + Box # -->
         <div class="two-col">
           <div class="frow-m">
             <label for="f-loc">Location</label>
@@ -508,15 +523,25 @@
           </div>
         </div>
 
-        <div class="frow-m">
-          <label for="f-subj">My Subject</label>
-          <select id="f-subj">
-            <option value="">— select —</option>
-            <option>Med</option><option>DH</option><option>His</option>
-            <option>Art</option><option>Tech</option><option>MidE</option>
-            <option>Ancient</option><option>Phil</option><option>Ethic</option>
-            <option>Practical</option><option>Cook</option>
-          </select>
+        <!-- Row 2: Owner + My Subject -->
+        <div class="two-col">
+          <div class="frow-m">
+            <label for="f-owner">Owner</label>
+            <select id="f-owner">
+              <option value="">— select —</option>
+              <option>ASP</option><option>TMH</option><option>borrowed</option>
+            </select>
+          </div>
+          <div class="frow-m">
+            <label for="f-subj">My Subject</label>
+            <select id="f-subj">
+              <option value="">— select —</option>
+              <option>Med</option><option>DH</option><option>His</option>
+              <option>Art</option><option>Tech</option><option>MidE</option>
+              <option>Ancient</option><option>Phil</option><option>Ethic</option>
+              <option>Practical</option><option>Cook</option>
+            </select>
+          </div>
         </div>
 
         <div class="frow-m">
@@ -617,26 +642,56 @@ const DB = {
 /* ═══════════════════════════════════════════════════════════
    LOOKUP APIs
 ═══════════════════════════════════════════════════════════ */
+
+// Returns true if string contains non-Latin script characters
+// (CJK, Arabic, Cyrillic, Hebrew, Thai, etc.)
+function hasNonLatin(str) {
+  return /[\u0400-\u04FF\u0600-\u06FF\u0900-\u097F\u3000-\u9FFF\uAC00-\uD7AF\uF900-\uFAFF]/.test(str);
+}
+
 async function fetchGoogle(isbn) {
-  const r = await fetch(`https://www.googleapis.com/books/v1/volumes?q=isbn:${isbn}&maxResults=1`);
-  const d = await r.json();
-  if (!d.items?.length) return null;
-  const v = d.items[0].volumeInfo, s = d.items[0].saleInfo || {};
-  return {
-    title:       v.title || '',
-    subtitle:    v.subtitle || '',
-    authors:     v.authors || [],
-    publisher:   v.publisher || '',
-    publishedDate: v.publishedDate || '',
-    description: v.description || '',
-    pageCount:   v.pageCount || null,
-    categories:  v.categories || [],
-    thumbnail:   (v.imageLinks?.thumbnail || '').replace('http:', 'https:'),
-    language:    v.language || '',
-    isbn10: (v.industryIdentifiers || []).find(i => i.type === 'ISBN_10')?.identifier || '',
-    isbn13: (v.industryIdentifiers || []).find(i => i.type === 'ISBN_13')?.identifier || '',
-    listPrice: s.retailPrice?.amount ?? s.listPrice?.amount ?? null
-  };
+  // Parse a Books API response item into our data shape
+  function _parse(item) {
+    const v = item.volumeInfo, s = item.saleInfo || {};
+    return {
+      title:        v.title || '',
+      subtitle:     v.subtitle || '',
+      authors:      v.authors || [],
+      publisher:    v.publisher || '',
+      publishedDate:v.publishedDate || '',
+      description:  v.description || '',
+      pageCount:    v.pageCount || null,
+      categories:   v.categories || [],
+      thumbnail:    (v.imageLinks?.thumbnail || '').replace('http:', 'https:'),
+      language:     v.language || '',
+      isbn10: (v.industryIdentifiers || []).find(i => i.type === 'ISBN_10')?.identifier || '',
+      isbn13: (v.industryIdentifiers || []).find(i => i.type === 'ISBN_13')?.identifier || '',
+      listPrice: s.retailPrice?.amount ?? s.listPrice?.amount ?? null
+    };
+  }
+
+  async function _call(url) {
+    try {
+      const r = await fetch(url);
+      const d = await r.json();
+      return d.items?.length ? _parse(d.items[0]) : null;
+    } catch(_) { return null; }
+  }
+
+  // Try English-restricted first — returns romanized author names for translated works
+  // e.g. "Haruki Murakami" instead of "村上春樹"
+  let result = await _call(
+    `https://www.googleapis.com/books/v1/volumes?q=isbn:${isbn}&maxResults=1&langRestrict=en`
+  );
+
+  // Fall back to unrestricted if no English record found
+  if (!result) {
+    result = await _call(
+      `https://www.googleapis.com/books/v1/volumes?q=isbn:${isbn}&maxResults=1`
+    );
+  }
+
+  return result;
 }
 
 async function fetchOpenLibrary(isbn) {
@@ -663,7 +718,20 @@ async function fetchOpenLibrary(isbn) {
 
 /* ═══════════════════════════════════════════════════════════
    SCANNER
+   Only accepts ISBN-13 (978xxxxxxxxxx or 979xxxxxxxxxx)
+   or ISBN-10 (9 digits + digit/X).
+   Price add-on barcodes (5 digits) and other codes are
+   silently ignored so the scanner keeps looking.
 ═══════════════════════════════════════════════════════════ */
+function looksLikeISBN(code) {
+  const c = code.trim().replace(/[-\s]/g, '');
+  // ISBN-13: starts with 978 or 979, exactly 13 digits
+  if (/^97[89]\d{10}$/.test(c)) return true;
+  // ISBN-10: 9 digits followed by a digit or X
+  if (/^\d{9}[\dX]$/i.test(c)) return true;
+  return false;
+}
+
 const Scanner = {
   inst: null, on: false,
 
@@ -686,8 +754,13 @@ const Scanner = {
             Html5QrcodeSupportedFormats.CODE_128
           ]
         },
-        code => { if (this.on) { this.stop().then(() => lookupISBN(code)); } },
-        ()   => {}
+        code => {
+          if (!this.on) return;
+          // Ignore price add-ons and any non-ISBN barcodes
+          if (!looksLikeISBN(code)) return;
+          this.stop().then(() => lookupISBN(code));
+        },
+        () => {}
       );
       this.on = true;
       document.getElementById('btn-cam').textContent = '⏸ Pause';
@@ -710,10 +783,11 @@ const Scanner = {
 /* ═══════════════════════════════════════════════════════════
    STATE
 ═══════════════════════════════════════════════════════════ */
-let allBooks    = [];
-let curBook     = null;
-let curIsNew    = false;
-let pricingFile = null;
+let allBooks     = [];
+let curBook      = null;
+let curIsNew     = false;
+let pricingFile  = null;
+let restoreFile  = null;
 
 /* ═══════════════════════════════════════════════════════════
    INIT
@@ -776,7 +850,20 @@ async function lookupISBN(rawIsbn) {
   }
 
   let data = null;
-  try { data = await fetchGoogle(isbn); }       catch (_) {}
+  try { data = await fetchGoogle(isbn); } catch (_) {}
+
+  // If Google returned non-Latin author names (e.g. Japanese script for a translated work),
+  // also check Open Library which usually stores the romanized English version.
+  // Keep Google's richer metadata but substitute the readable author names.
+  if (data && data.authors.some(a => hasNonLatin(a))) {
+    try {
+      const ol = await fetchOpenLibrary(isbn);
+      if (ol && ol.authors.length && !ol.authors.some(a => hasNonLatin(a))) {
+        data.authors = ol.authors; // swap in the Latin-script names
+      }
+    } catch (_) {}
+  }
+
   if (!data) {
     try { data = await fetchOpenLibrary(isbn); } catch (_) {}
   }
@@ -794,7 +881,7 @@ async function lookupISBN(rawIsbn) {
   const now = new Date().toISOString();
   const book = Object.assign(data, {
     id: uid(), isbn,
-    location: '', boxNumber: null, customSubject: '',
+    location: '', boxNumber: null, owner: '', customSubject: '',
     notes: '', usedValue: null,
     dateAdded: now, dateModified: now
   });
@@ -843,12 +930,13 @@ function openModal(book, isNew) {
     `Added: ${book.dateAdded ? new Date(book.dateAdded).toLocaleDateString() : '—'}`;
 
   // Custom fields
-  setVal('f-loc',  book.location || '');
-  setVal('f-box',  book.boxNumber || '');
-  setVal('f-subj', book.customSubject || '');
-  setVal('f-notes',book.notes || '');
-  setVal('f-list', book.listPrice != null ? book.listPrice : '');
-  setVal('f-used', book.usedValue  != null ? book.usedValue  : '');
+  setVal('f-loc',   book.location || '');
+  setVal('f-box',   book.boxNumber || '');
+  setVal('f-owner', book.owner || '');
+  setVal('f-subj',  book.customSubject || '');
+  setVal('f-notes', book.notes || '');
+  setVal('f-list',  book.listPrice != null ? book.listPrice : '');
+  setVal('f-used',  book.usedValue  != null ? book.usedValue  : '');
 
   // Hide delete for new books
   document.getElementById('m-del-btn').style.display = isNew ? 'none' : '';
@@ -869,6 +957,7 @@ async function saveBook() {
   if (!curBook) return;
   curBook.location      = getVal('f-loc');
   curBook.boxNumber     = getVal('f-box') ? parseInt(getVal('f-box')) : null;
+  curBook.owner         = getVal('f-owner');
   curBook.customSubject = getVal('f-subj');
   curBook.notes         = getVal('f-notes').trim();
   curBook.listPrice     = getVal('f-list') !== '' ? parseFloat(getVal('f-list')) : null;
@@ -952,9 +1041,10 @@ function renderCatalog() {
         <div class="btitle">${esc(b.title || 'Untitled')}</div>
         <div class="bauthor">${esc((b.authors||[]).join(', ') || 'Unknown Author')}</div>
         <div class="btags">
-          ${b.location     ? `<span class="tag loc">${esc(b.location)}</span>`      : ''}
-          ${b.customSubject? `<span class="tag subj">${esc(b.customSubject)}</span>`: ''}
-          ${b.boxNumber    ? `<span class="tag box">Box ${b.boxNumber}</span>`       : ''}
+          ${b.location      ? `<span class="tag loc">${esc(b.location)}</span>`       : ''}
+          ${b.owner         ? `<span class="tag owner">${esc(b.owner)}</span>`         : ''}
+          ${b.customSubject ? `<span class="tag subj">${esc(b.customSubject)}</span>`  : ''}
+          ${b.boxNumber     ? `<span class="tag box">Box ${b.boxNumber}</span>`        : ''}
           ${b.usedValue != null ? `<span class="tag">$${b.usedValue.toFixed(2)}</span>` : ''}
         </div>
       </div>
@@ -968,7 +1058,7 @@ function exportAllCSV() {
   if (!allBooks.length) { showToast('No books to export', 'warning'); return; }
   const hdr = ['ISBN','ISBN13','ISBN10','Title','Subtitle','Authors','Publisher',
                'PublishedDate','PageCount','Language','APICategories',
-               'Location','BoxNumber','MySubject','ListPrice','UsedValue',
+               'Location','BoxNumber','Owner','MySubject','ListPrice','UsedValue',
                'Notes','DateAdded','DateModified'];
   const rows = allBooks.map(b => [
     b.isbn, b.isbn13||'', b.isbn10||'',
@@ -977,6 +1067,7 @@ function exportAllCSV() {
     b.pageCount||'', b.language||'',
     (b.categories||[]).join('; '),
     b.location||'', b.boxNumber||'',
+    b.owner||'',
     b.customSubject||'',
     b.listPrice != null ? b.listPrice.toFixed(2) : '',
     b.usedValue != null ? b.usedValue.toFixed(2) : '',
@@ -1050,6 +1141,113 @@ async function importPricing() {
   showLoad(false);
   showToast(`Updated ${updated} book${updated!==1?'s':''}`, updated > 0 ? 'success' : 'warning');
   updateStats();
+}
+
+/* ═══════════════════════════════════════════════════════════
+   RESTORE / TRANSFER CATALOG
+   Reads the full catalog CSV (exported from this app) and
+   restores it — handles both old format (no Owner column)
+   and new format. Merge mode skips existing ISBNs.
+═══════════════════════════════════════════════════════════ */
+function onRestoreFile() {
+  restoreFile = document.getElementById('restore-file').files[0];
+  document.getElementById('rf-name').textContent =
+    restoreFile ? 'Selected: ' + restoreFile.name : '';
+}
+
+async function restoreCatalog(mode) {
+  if (!restoreFile) { showToast('Choose a catalog CSV file first', 'warning'); return; }
+
+  const text = await restoreFile.text();
+  const rows = parseCSV(text);
+  if (rows.length < 2) { showToast('CSV appears empty', 'error'); return; }
+
+  // Build a case-insensitive column index map
+  const hdrs = rows[0].map(h => h.trim().toLowerCase().replace(/[\s_]/g, ''));
+  const ci = name => hdrs.findIndex(h => h === name);
+
+  const cISBN   = ci('isbn');
+  const cISBN13 = ci('isbn13');
+  const cISBN10 = ci('isbn10');
+  const cTitle  = ci('title');
+  const cSub    = ci('subtitle');
+  const cAuth   = ci('authors');
+  const cPub    = ci('publisher');
+  const cDate   = ci('publisheddate');
+  const cPages  = ci('pagecount');
+  const cLang   = ci('language');
+  const cCats   = ci('apicategories');
+  const cLoc    = ci('location');
+  const cBox    = ci('boxnumber');
+  const cOwner  = ci('owner');        // -1 in older exports — that's fine
+  const cSubj   = ci('mysubject');
+  const cList   = ci('listprice');
+  const cUsed   = ci('usedvalue');
+  const cNotes  = ci('notes');
+
+  if (cISBN < 0 || cTitle < 0) {
+    showToast('This does not look like a Book Catalog CSV', 'error'); return;
+  }
+
+  if (mode === 'replace') {
+    if (!confirm(`This will DELETE all ${allBooks.length} current book${allBooks.length!==1?'s':''} and replace them with the imported file.\n\nContinue?`)) return;
+    await DB.clear();
+    allBooks = [];
+  }
+
+  showLoad(true);
+  let added = 0, skipped = 0;
+  const now = new Date().toISOString();
+  const g = (row, idx) => (idx >= 0 ? (row[idx] || '') : '').trim();
+
+  for (let i = 1; i < rows.length; i++) {
+    const row  = rows[i];
+    const isbn = g(row, cISBN).replace(/[-\s]/g, '');
+    if (!isbn) continue;
+
+    // Merge mode: skip ISBNs already in catalog
+    if (mode === 'merge' && allBooks.some(b => b.isbn === isbn || b.isbn13 === isbn)) {
+      skipped++; continue;
+    }
+
+    const authRaw = g(row, cAuth);
+    const book = {
+      id:           uid(),
+      isbn,
+      isbn13:       g(row, cISBN13),
+      isbn10:       g(row, cISBN10),
+      title:        g(row, cTitle),
+      subtitle:     g(row, cSub),
+      authors:      authRaw ? authRaw.split('; ').map(a => a.trim()).filter(Boolean) : [],
+      publisher:    g(row, cPub),
+      publishedDate:g(row, cDate),
+      pageCount:    g(row, cPages) ? parseInt(g(row, cPages)) : null,
+      language:     g(row, cLang),
+      categories:   g(row, cCats) ? g(row, cCats).split('; ').filter(Boolean) : [],
+      thumbnail:    '',
+      description:  '',
+      location:     g(row, cLoc),
+      boxNumber:    g(row, cBox)  ? parseInt(g(row, cBox))  : null,
+      owner:        g(row, cOwner),   // blank string if column absent — fine
+      customSubject:g(row, cSubj),
+      listPrice:    g(row, cList) ? parseFloat(g(row, cList)) : null,
+      usedValue:    g(row, cUsed) ? parseFloat(g(row, cUsed)) : null,
+      notes:        g(row, cNotes),
+      dateAdded:    now,
+      dateModified: now
+    };
+
+    await DB.put(book);
+    allBooks.push(book);
+    added++;
+  }
+
+  showLoad(false);
+  updateCount(); renderCatalog(); updateStats();
+  const msg = mode === 'merge'
+    ? `Imported ${added} book${added!==1?'s':''}${skipped ? ' · skipped ' + skipped + ' duplicate' + (skipped!==1?'s':'') : ''}`
+    : `Restored ${added} book${added!==1?'s':''}`;
+  showToast(msg, 'success', 4500);
 }
 
 /* Minimal CSV parser — handles quoted fields and CRLF */
