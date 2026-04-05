@@ -1,0 +1,1140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="BookCat">
+  <meta name="theme-color" content="#1a3a5c">
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="icon.svg">
+  <title>Book Catalog</title>
+  <style>
+    :root {
+      --primary:       #1a3a5c;
+      --primary-light: #2657a0;
+      --accent:        #e8a020;
+      --bg:            #f0ede8;
+      --surface:       #ffffff;
+      --text:          #1a1a1a;
+      --text-muted:    #666;
+      --border:        #ddd;
+      --danger:        #c0392b;
+      --success:       #27ae60;
+      --warning:       #d68910;
+      --nav-h:         60px;
+      --hdr-h:         52px;
+      --safe-b:        env(safe-area-inset-bottom, 0px);
+      --safe-t:        env(safe-area-inset-top, 0px);
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      height: 100%; height: 100dvh;
+      overflow: hidden;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+    body {
+      display: flex; flex-direction: column;
+      padding-top: var(--safe-t);
+    }
+
+    /* ── HEADER ── */
+    #app-header {
+      background: var(--primary); color: white;
+      height: var(--hdr-h); flex-shrink: 0;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0 16px;
+    }
+    #app-header h1 { font-size: 18px; font-weight: 700; letter-spacing: -0.3px; }
+    #book-count { font-size: 13px; opacity: 0.75; }
+
+    /* ── MAIN / TABS ── */
+    #main-content { flex: 1; overflow: hidden; position: relative; }
+    .tab-panel {
+      display: none; position: absolute; inset: 0;
+      flex-direction: column; overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+    .tab-panel.active { display: flex; }
+
+    /* ── BOTTOM NAV ── */
+    #bottom-nav {
+      background: var(--surface); border-top: 1px solid var(--border);
+      display: flex;
+      height: calc(var(--nav-h) + var(--safe-b));
+      padding-bottom: var(--safe-b);
+      flex-shrink: 0;
+    }
+    .nav-btn {
+      flex: 1; border: none; background: none; cursor: pointer;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 2px; color: var(--text-muted); font-size: 11px;
+      touch-action: manipulation; transition: color .15s;
+    }
+    .nav-btn .ni { font-size: 23px; line-height: 1; }
+    .nav-btn.active { color: var(--primary-light); }
+
+    /* ═══════════════════════════════════
+       SCAN TAB
+    ═══════════════════════════════════ */
+    #tab-scan { background: #0a0a0a; overflow: hidden; }
+    #scanner-wrap {
+      flex: 1; position: relative; overflow: hidden; min-height: 0;
+    }
+    #reader { width: 100%; height: 100%; }
+    /* Override html5-qrcode injected styles */
+    #reader video { object-fit: cover !important; width: 100% !important; height: 100% !important; }
+    #reader img { display: none !important; }
+    #reader > div:first-child { padding: 0 !important; border: none !important; }
+
+    #scan-aim {
+      position: absolute; inset: 0; pointer-events: none;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+    }
+    .aim-box {
+      width: 270px; height: 115px;
+      border: 3px solid var(--accent); border-radius: 14px;
+      box-shadow: 0 0 0 9999px rgba(0,0,0,.45);
+    }
+    .aim-hint { color: #fff; margin-top: 14px; font-size: 13px; text-shadow: 0 1px 4px rgba(0,0,0,.9); }
+
+    #scan-bar {
+      background: #111; padding: 10px 12px;
+      display: flex; gap: 8px; align-items: center; flex-shrink: 0;
+    }
+    #btn-cam {
+      background: var(--primary-light); color: white; border: none;
+      padding: 10px 13px; border-radius: 8px; font-size: 13px; font-weight: 600;
+      cursor: pointer; touch-action: manipulation; white-space: nowrap; flex-shrink: 0;
+    }
+    #isbn-in {
+      flex: 1; background: #222; border: 1px solid #444; color: white;
+      padding: 10px 13px; border-radius: 8px; font-size: 16px; outline: none;
+    }
+    #isbn-in::placeholder { color: #555; }
+    #btn-go {
+      background: var(--accent); color: #000; border: none;
+      padding: 10px 15px; border-radius: 8px; font-size: 15px; font-weight: 700;
+      cursor: pointer; touch-action: manipulation; flex-shrink: 0;
+    }
+    #scan-msg {
+      background: #111; color: #888; text-align: center;
+      padding: 5px 12px; font-size: 12px; min-height: 26px; flex-shrink: 0;
+    }
+
+    /* ═══════════════════════════════════
+       CATALOG TAB
+    ═══════════════════════════════════ */
+    #tab-catalog { background: var(--bg); }
+    #cat-filters {
+      background: var(--surface); border-bottom: 1px solid var(--border);
+      padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; flex-shrink: 0;
+    }
+    #search-in {
+      width: 100%; padding: 9px 14px; border: 1.5px solid var(--border);
+      border-radius: 8px; font-size: 16px; background: var(--bg);
+      outline: none; color: var(--text);
+    }
+    .frow { display: flex; gap: 8px; }
+    .frow select {
+      flex: 1; padding: 7px 8px; border: 1.5px solid var(--border);
+      border-radius: 8px; font-size: 14px; background: var(--bg); color: var(--text);
+      appearance: none; -webkit-appearance: none;
+    }
+    #cat-count {
+      font-size: 12px; color: var(--text-muted); padding: 5px 14px; flex-shrink: 0;
+    }
+    #cat-list { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+
+    .bcard {
+      background: var(--surface); border-bottom: 1px solid var(--border);
+      padding: 11px 13px; display: flex; gap: 12px;
+      cursor: pointer; touch-action: manipulation;
+    }
+    .bcard:active { background: #e8e4de; }
+    .bthumb {
+      width: 44px; height: 60px; object-fit: cover;
+      border-radius: 3px; flex-shrink: 0;
+    }
+    .bthumb-ph {
+      width: 44px; height: 60px; background: var(--primary); border-radius: 3px;
+      flex-shrink: 0; display: flex; align-items: center; justify-content: center;
+      font-size: 22px; color: white;
+    }
+    .binfo { flex: 1; min-width: 0; }
+    .btitle {
+      font-size: 14px; font-weight: 600; line-height: 1.3;
+      overflow: hidden; display: -webkit-box;
+      -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+    }
+    .bauthor { font-size: 12px; color: var(--text-muted); margin-top: 2px;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .btags { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 6px; }
+    .tag {
+      font-size: 11px; padding: 2px 7px; border-radius: 12px;
+      background: #dce8fd; color: var(--primary-light);
+    }
+    .tag.loc  { background: #fef0d8; color: #9a5200; }
+    .tag.subj { background: #dff3e0; color: #1a6e1a; }
+    .tag.box  { background: #f2eaff; color: #5c2ea0; }
+
+    .empty {
+      flex: 1; display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      gap: 12px; color: var(--text-muted); padding: 40px 20px; text-align: center;
+    }
+    .empty .eicon { font-size: 52px; }
+
+    /* ═══════════════════════════════════
+       EXPORT TAB
+    ═══════════════════════════════════ */
+    #tab-export { padding: 14px; gap: 14px; background: var(--bg); }
+    .xcard {
+      background: var(--surface); border-radius: 12px;
+      padding: 16px; border: 1px solid var(--border);
+    }
+    .xcard h2 { font-size: 15px; font-weight: 700; color: var(--primary); margin-bottom: 6px; }
+    .xcard p { font-size: 13px; color: var(--text-muted); line-height: 1.4; margin-bottom: 12px; }
+
+    .btn-p, .btn-s {
+      display: block; width: 100%; border: none; padding: 13px 12px;
+      border-radius: 9px; font-size: 15px; font-weight: 600;
+      cursor: pointer; touch-action: manipulation; text-align: center; margin-bottom: 8px;
+    }
+    .btn-p:last-child, .btn-s:last-child { margin-bottom: 0; }
+    .btn-p { background: var(--primary); color: white; }
+    .btn-s { background: var(--bg); color: var(--primary); border: 1.5px solid var(--primary); }
+    .btn-danger { background: var(--bg); color: var(--danger); border: 1.5px solid var(--danger); }
+
+    .file-label {
+      display: block; width: 100%; padding: 12px;
+      border: 2px dashed var(--border); border-radius: 9px;
+      font-size: 14px; text-align: center; color: var(--text-muted);
+      cursor: pointer; margin-bottom: 6px; touch-action: manipulation;
+    }
+    #pricing-file { display: none; }
+    #pf-name { font-size: 12px; color: var(--text-muted); margin-bottom: 8px; min-height: 18px; }
+
+    .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .sbox { background: var(--bg); border-radius: 8px; padding: 12px; text-align: center; }
+    .snum { font-size: 30px; font-weight: 700; color: var(--primary); line-height: 1; }
+    .slbl { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
+
+    /* ═══════════════════════════════════
+       MODAL (bottom sheet)
+    ═══════════════════════════════════ */
+    .modal { position: fixed; inset: 0; z-index: 100; display: flex; flex-direction: column; }
+    .modal.hidden { display: none; }
+    .mbdrop { position: absolute; inset: 0; background: rgba(0,0,0,.5); }
+    .msheet {
+      position: absolute; bottom: 0; left: 0; right: 0;
+      background: var(--surface); border-radius: 20px 20px 0 0;
+      max-height: 93dvh; display: flex; flex-direction: column;
+      padding-bottom: var(--safe-b);
+    }
+    .mhandle {
+      width: 40px; height: 4px; background: #ccc; border-radius: 2px;
+      margin: 12px auto 0; flex-shrink: 0;
+    }
+    .mhdr {
+      padding: 10px 15px 10px; display: flex; align-items: center;
+      border-bottom: 1px solid var(--border); flex-shrink: 0; gap: 10px;
+    }
+    .mtitle {
+      flex: 1; font-size: 16px; font-weight: 700; line-height: 1.3;
+      overflow: hidden; display: -webkit-box;
+      -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+    }
+    .mclose {
+      background: #ebebeb; border: none; width: 30px; height: 30px;
+      border-radius: 50%; font-size: 15px; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      touch-action: manipulation; flex-shrink: 0;
+    }
+    .mbody {
+      flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 14px 15px;
+    }
+    .mfooter {
+      padding: 11px 15px; border-top: 1px solid var(--border);
+      display: flex; gap: 10px; flex-shrink: 0;
+    }
+    .btn-save {
+      flex: 1; background: var(--primary); color: white; border: none;
+      padding: 14px; border-radius: 10px; font-size: 16px; font-weight: 700;
+      cursor: pointer; touch-action: manipulation;
+    }
+    .btn-del {
+      background: none; border: 1.5px solid var(--danger); color: var(--danger);
+      padding: 14px 16px; border-radius: 10px; font-size: 15px;
+      cursor: pointer; touch-action: manipulation;
+    }
+
+    /* Book info block */
+    .bk-block { display: flex; gap: 13px; margin-bottom: 13px; }
+    .cover-img {
+      width: 76px; height: 108px; object-fit: cover;
+      border-radius: 5px; flex-shrink: 0;
+    }
+    .cover-ph {
+      width: 76px; height: 108px; background: var(--primary); border-radius: 5px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 32px; flex-shrink: 0;
+    }
+    .bk-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+    .bk-title { font-size: 15px; font-weight: 700; line-height: 1.3; }
+    .bk-author { font-size: 13px; color: var(--text-muted); }
+    .bk-pub { font-size: 12px; color: var(--text-muted); }
+
+    .bk-desc {
+      font-size: 12px; color: var(--text-muted); line-height: 1.5;
+      margin-bottom: 10px;
+    }
+    .cat-wrap { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 12px; }
+    .ctag {
+      font-size: 11px; padding: 2px 8px; border-radius: 12px;
+      background: #f0f0f0; color: var(--text-muted);
+    }
+
+    /* Form sections in modal */
+    .fsec { margin-bottom: 16px; }
+    .fsec-title {
+      font-size: 11px; font-weight: 700; color: var(--text-muted);
+      text-transform: uppercase; letter-spacing: .6px; margin-bottom: 10px;
+    }
+    .frow-m { margin-bottom: 11px; }
+    .frow-m label {
+      display: block; font-size: 13px; font-weight: 600; margin-bottom: 5px;
+    }
+    .frow-m input, .frow-m select, .frow-m textarea {
+      width: 100%; padding: 10px 12px; border: 1.5px solid var(--border);
+      border-radius: 8px; font-size: 16px; background: var(--surface);
+      color: var(--text); outline: none; transition: border-color .2s;
+      appearance: none; -webkit-appearance: none;
+    }
+    .frow-m input:focus, .frow-m select:focus, .frow-m textarea:focus {
+      border-color: var(--primary-light);
+    }
+    .frow-m textarea { height: 80px; resize: none; }
+    .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .price-wrap { position: relative; }
+    .price-pfx {
+      position: absolute; left: 12px; top: 50%; transform: translateY(-50%);
+      color: var(--text-muted); font-size: 15px; pointer-events: none;
+    }
+    .price-wrap input { padding-left: 22px !important; }
+
+    .isbn-info-row { font-size: 13px; color: var(--text-muted); line-height: 1.9; }
+
+    /* ── TOAST ── */
+    #toast {
+      position: fixed; z-index: 300;
+      bottom: calc(var(--nav-h) + var(--safe-b) + 10px);
+      left: 50%; transform: translateX(-50%);
+      background: #333; color: white;
+      padding: 9px 20px; border-radius: 20px;
+      font-size: 14px; max-width: calc(100vw - 32px); text-align: center;
+      pointer-events: none; opacity: 1; transition: opacity .3s;
+    }
+    #toast.hidden { opacity: 0; }
+    #toast.success { background: var(--success); }
+    #toast.error   { background: var(--danger); }
+    #toast.warning { background: var(--warning); color: #000; }
+    #toast.info    { background: var(--primary-light); }
+
+    /* ── LOADING ── */
+    #loading {
+      position: fixed; inset: 0; z-index: 200;
+      background: rgba(0,0,0,.4);
+      display: flex; align-items: center; justify-content: center;
+    }
+    #loading.hidden { display: none; }
+    .spin {
+      width: 48px; height: 48px; border-radius: 50%;
+      border: 4px solid rgba(255,255,255,.3); border-top-color: #fff;
+      animation: spin .8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+
+<!-- ═══ HEADER ═══ -->
+<header id="app-header">
+  <h1>📚 Book Catalog</h1>
+  <span id="book-count">Loading…</span>
+</header>
+
+<!-- ═══ MAIN ═══ -->
+<main id="main-content">
+
+  <!-- ─── SCAN TAB ─── -->
+  <section id="tab-scan" class="tab-panel active">
+    <div id="scanner-wrap">
+      <div id="reader"></div>
+      <div id="scan-aim">
+        <div class="aim-box"></div>
+        <div class="aim-hint">Aim at barcode</div>
+      </div>
+    </div>
+    <div id="scan-bar">
+      <button id="btn-cam" onclick="toggleScanner()">▶ Camera</button>
+      <input id="isbn-in" type="text" placeholder="Or type ISBN…"
+             inputmode="numeric" maxlength="17" autocomplete="off">
+      <button id="btn-go" onclick="handleManualLookup()">Go</button>
+    </div>
+    <div id="scan-msg">Tap Camera to start scanning</div>
+  </section>
+
+  <!-- ─── CATALOG TAB ─── -->
+  <section id="tab-catalog" class="tab-panel">
+    <div id="cat-filters">
+      <input id="search-in" type="search" placeholder="Search title, author, ISBN…"
+             oninput="renderCatalog()">
+      <div class="frow">
+        <select id="fl-loc" onchange="renderCatalog()">
+          <option value="">All Locations</option>
+          <option>AP-B</option><option>TMH-B</option><option>AP-S</option>
+          <option>HALL</option><option>BR</option><option>LR</option><option>Other</option>
+        </select>
+        <select id="fl-subj" onchange="renderCatalog()">
+          <option value="">All Subjects</option>
+          <option>Med</option><option>DH</option><option>His</option>
+          <option>Art</option><option>Tech</option><option>MidE</option>
+          <option>Ancient</option><option>Phil</option><option>Ethic</option>
+          <option>Practical</option><option>Cook</option>
+        </select>
+      </div>
+    </div>
+    <div id="cat-count"></div>
+    <div id="cat-list"></div>
+  </section>
+
+  <!-- ─── EXPORT TAB ─── -->
+  <section id="tab-export" class="tab-panel">
+
+    <div class="xcard">
+      <h2>📤 Export Catalog</h2>
+      <p>Save your full catalog as a CSV — open in Excel, Numbers, or transfer to your computer. Includes all fields.</p>
+      <button class="btn-p" onclick="exportAllCSV()">Export Full Catalog (CSV)</button>
+      <button class="btn-s" onclick="exportISBNsCSV()">Export ISBNs Only (for BookScouter)</button>
+    </div>
+
+    <div class="xcard">
+      <h2>💲 Import Pricing</h2>
+      <p>After a bulk price lookup on BookScouter, BookTrapper, or Biblio, upload the result CSV here.
+         Columns needed: <strong>ISBN</strong> plus any of <strong>ListPrice</strong> / <strong>UsedValue</strong> (or similar names).</p>
+      <label for="pricing-file" class="file-label">📂 Choose pricing CSV…</label>
+      <input type="file" id="pricing-file" accept=".csv" onchange="onPricingFile()">
+      <div id="pf-name"></div>
+      <button class="btn-p" onclick="importPricing()">Import Pricing Data</button>
+    </div>
+
+    <div class="xcard">
+      <h2>📊 Statistics</h2>
+      <div class="stats-grid">
+        <div class="sbox"><div class="snum" id="s-total">—</div><div class="slbl">Total Books</div></div>
+        <div class="sbox"><div class="snum" id="s-priced">—</div><div class="slbl">With Pricing</div></div>
+        <div class="sbox"><div class="snum" id="s-located">—</div><div class="slbl">Located</div></div>
+        <div class="sbox"><div class="snum" id="s-boxed">—</div><div class="slbl">Boxed</div></div>
+      </div>
+    </div>
+
+    <div class="xcard">
+      <h2>⚠️ Danger Zone</h2>
+      <p>Permanently delete ALL books from this catalog. This cannot be undone.</p>
+      <button class="btn-s btn-danger" onclick="clearAllBooks()">Delete Entire Catalog…</button>
+    </div>
+
+  </section>
+
+</main>
+
+<!-- ═══ BOTTOM NAV ═══ -->
+<nav id="bottom-nav">
+  <button class="nav-btn active" data-tab="scan" onclick="showTab('scan')">
+    <span class="ni">📷</span><span>Scan</span>
+  </button>
+  <button class="nav-btn" data-tab="catalog" onclick="showTab('catalog')">
+    <span class="ni">📚</span><span>Books</span>
+  </button>
+  <button class="nav-btn" data-tab="export" onclick="showTab('export')">
+    <span class="ni">⬆</span><span>Export</span>
+  </button>
+</nav>
+
+<!-- ═══ BOOK MODAL ═══ -->
+<div id="book-modal" class="modal hidden">
+  <div class="mbdrop" onclick="closeModal()"></div>
+  <div class="msheet">
+    <div class="mhandle"></div>
+    <div class="mhdr">
+      <div class="mtitle" id="m-header-title">Book Details</div>
+      <button class="mclose" onclick="closeModal()">✕</button>
+    </div>
+    <div class="mbody">
+
+      <!-- Cover + basic info -->
+      <div class="bk-block">
+        <div id="m-cover"></div>
+        <div class="bk-meta">
+          <div class="bk-title" id="m-title"></div>
+          <div class="bk-author" id="m-authors"></div>
+          <div class="bk-pub" id="m-pub"></div>
+        </div>
+      </div>
+
+      <div class="bk-desc" id="m-desc"></div>
+      <div class="cat-wrap" id="m-cats"></div>
+
+      <!-- ── MY CATALOG FIELDS ── -->
+      <div class="fsec">
+        <div class="fsec-title">My Catalog Fields</div>
+
+        <div class="two-col">
+          <div class="frow-m">
+            <label for="f-loc">Location</label>
+            <select id="f-loc">
+              <option value="">— select —</option>
+              <option>AP-B</option><option>TMH-B</option><option>AP-S</option>
+              <option>HALL</option><option>BR</option><option>LR</option><option>Other</option>
+            </select>
+          </div>
+          <div class="frow-m">
+            <label for="f-box">Box #</label>
+            <input type="number" id="f-box" placeholder="empty" min="1" max="9999" inputmode="numeric">
+          </div>
+        </div>
+
+        <div class="frow-m">
+          <label for="f-subj">My Subject</label>
+          <select id="f-subj">
+            <option value="">— select —</option>
+            <option>Med</option><option>DH</option><option>His</option>
+            <option>Art</option><option>Tech</option><option>MidE</option>
+            <option>Ancient</option><option>Phil</option><option>Ethic</option>
+            <option>Practical</option><option>Cook</option>
+          </select>
+        </div>
+
+        <div class="frow-m">
+          <label for="f-notes">Notes</label>
+          <textarea id="f-notes" placeholder="Condition, where you got it, notes for later…"></textarea>
+        </div>
+      </div>
+
+      <!-- ── PRICING ── -->
+      <div class="fsec">
+        <div class="fsec-title">Pricing</div>
+        <div class="two-col">
+          <div class="frow-m">
+            <label for="f-list">List Price</label>
+            <div class="price-wrap">
+              <span class="price-pfx">$</span>
+              <input type="number" id="f-list" placeholder="0.00" step="0.01" min="0" inputmode="decimal">
+            </div>
+          </div>
+          <div class="frow-m">
+            <label for="f-used">Used Value</label>
+            <div class="price-wrap">
+              <span class="price-pfx">$</span>
+              <input type="number" id="f-used" placeholder="0.00" step="0.01" min="0" inputmode="decimal">
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── ISBN META ── -->
+      <div class="fsec">
+        <div class="fsec-title">Book Info</div>
+        <div class="isbn-info-row" id="m-isbn-block"></div>
+      </div>
+
+    </div><!-- /mbody -->
+    <div class="mfooter">
+      <button class="btn-del" id="m-del-btn" onclick="deleteCurrentBook()">🗑</button>
+      <button class="btn-save" onclick="saveBook()">Save Book</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ LOADING ═══ -->
+<div id="loading" class="hidden"><div class="spin"></div></div>
+
+<!-- ═══ TOAST ═══ -->
+<div id="toast" class="hidden"></div>
+
+<!-- html5-qrcode from CDN -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
+
+<script>
+'use strict';
+
+/* ═══════════════════════════════════════════════════════════
+   DATABASE  (IndexedDB)
+═══════════════════════════════════════════════════════════ */
+const DB = {
+  _db: null,
+
+  async init() {
+    return new Promise((res, rej) => {
+      const req = indexedDB.open('BookCatalog', 1);
+      req.onupgradeneeded = e => {
+        const db = e.target.result;
+        if (!db.objectStoreNames.contains('books')) {
+          const st = db.createObjectStore('books', { keyPath: 'id' });
+          st.createIndex('isbn',      'isbn',      { unique: false });
+          st.createIndex('title',     'title',     { unique: false });
+          st.createIndex('location',  'location',  { unique: false });
+          st.createIndex('dateAdded', 'dateAdded', { unique: false });
+        }
+      };
+      req.onsuccess = e => { this._db = e.target.result; res(); };
+      req.onerror   = e => rej(e.target.error);
+    });
+  },
+
+  _s(mode) { return this._db.transaction('books', mode).objectStore('books'); },
+  _p(r)    { return new Promise((res, rej) => { r.onsuccess = e => res(e.target.result); r.onerror = e => rej(e.target.error); }); },
+
+  getAll()       { return this._p(this._s('readonly').getAll()); },
+  get(id)        { return this._p(this._s('readonly').get(id)); },
+  put(b)         { return this._p(this._s('readwrite').put(b)); },
+  del(id)        { return this._p(this._s('readwrite').delete(id)); },
+  byISBN(isbn)   { return this._p(this._s('readonly').index('isbn').getAll(isbn)); },
+
+  async clear() {
+    return new Promise((res, rej) => {
+      const req = this._s('readwrite').clear();
+      req.onsuccess = () => res();
+      req.onerror   = e => rej(e.target.error);
+    });
+  }
+};
+
+/* ═══════════════════════════════════════════════════════════
+   LOOKUP APIs
+═══════════════════════════════════════════════════════════ */
+async function fetchGoogle(isbn) {
+  const r = await fetch(`https://www.googleapis.com/books/v1/volumes?q=isbn:${isbn}&maxResults=1`);
+  const d = await r.json();
+  if (!d.items?.length) return null;
+  const v = d.items[0].volumeInfo, s = d.items[0].saleInfo || {};
+  return {
+    title:       v.title || '',
+    subtitle:    v.subtitle || '',
+    authors:     v.authors || [],
+    publisher:   v.publisher || '',
+    publishedDate: v.publishedDate || '',
+    description: v.description || '',
+    pageCount:   v.pageCount || null,
+    categories:  v.categories || [],
+    thumbnail:   (v.imageLinks?.thumbnail || '').replace('http:', 'https:'),
+    language:    v.language || '',
+    isbn10: (v.industryIdentifiers || []).find(i => i.type === 'ISBN_10')?.identifier || '',
+    isbn13: (v.industryIdentifiers || []).find(i => i.type === 'ISBN_13')?.identifier || '',
+    listPrice: s.retailPrice?.amount ?? s.listPrice?.amount ?? null
+  };
+}
+
+async function fetchOpenLibrary(isbn) {
+  const r = await fetch(`https://openlibrary.org/api/books?bibkeys=ISBN:${isbn}&format=json&jscmd=data`);
+  const d = await r.json();
+  const b = d[`ISBN:${isbn}`];
+  if (!b) return null;
+  return {
+    title:       b.title || '',
+    subtitle:    b.subtitle || '',
+    authors:     (b.authors || []).map(a => a.name),
+    publisher:   (b.publishers || []).map(p => p.name).join('; '),
+    publishedDate: b.publish_date || '',
+    description: (typeof b.description === 'object' ? b.description?.value : b.description) || '',
+    pageCount:   b.number_of_pages || null,
+    categories:  (b.subjects || []).slice(0, 8).map(s => s.name || s),
+    thumbnail:   b.cover?.medium || '',
+    language:    '',
+    isbn10: '',
+    isbn13: isbn.length === 13 ? isbn : '',
+    listPrice: null
+  };
+}
+
+/* ═══════════════════════════════════════════════════════════
+   SCANNER
+═══════════════════════════════════════════════════════════ */
+const Scanner = {
+  inst: null, on: false,
+
+  async start() {
+    if (this.on) return;
+    setScanMsg('Starting camera…');
+    try {
+      this.inst = new Html5Qrcode('reader');
+      await this.inst.start(
+        { facingMode: 'environment' },
+        {
+          fps: 10,
+          qrbox: { width: 265, height: 115 },
+          aspectRatio: 1.77,
+          formatsToSupport: [
+            Html5QrcodeSupportedFormats.EAN_13,
+            Html5QrcodeSupportedFormats.EAN_8,
+            Html5QrcodeSupportedFormats.UPC_A,
+            Html5QrcodeSupportedFormats.UPC_E,
+            Html5QrcodeSupportedFormats.CODE_128
+          ]
+        },
+        code => { if (this.on) { this.stop().then(() => lookupISBN(code)); } },
+        ()   => {}
+      );
+      this.on = true;
+      document.getElementById('btn-cam').textContent = '⏸ Pause';
+      document.getElementById('scan-aim').style.display = 'flex';
+      setScanMsg('📷 Scanning — aim barcode at the box');
+    } catch (err) {
+      setScanMsg('Camera error: ' + (err.message || err));
+    }
+  },
+
+  async stop() {
+    if (!this.on || !this.inst) return;
+    try { await this.inst.stop(); await this.inst.clear(); } catch (_) {}
+    this.inst = null; this.on = false;
+    document.getElementById('btn-cam').textContent = '▶ Camera';
+    setScanMsg('Tap Camera to start scanning');
+  }
+};
+
+/* ═══════════════════════════════════════════════════════════
+   STATE
+═══════════════════════════════════════════════════════════ */
+let allBooks    = [];
+let curBook     = null;
+let curIsNew    = false;
+let pricingFile = null;
+
+/* ═══════════════════════════════════════════════════════════
+   INIT
+═══════════════════════════════════════════════════════════ */
+async function init() {
+  await DB.init();
+  allBooks = await DB.getAll();
+  updateCount();
+  renderCatalog();
+  updateStats();
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════
+   NAVIGATION
+═══════════════════════════════════════════════════════════ */
+function showTab(name) {
+  if (name !== 'scan' && Scanner.on) Scanner.stop();
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
+  document.getElementById('tab-' + name).classList.add('active');
+  if (name === 'catalog') renderCatalog();
+  if (name === 'export')  updateStats();
+}
+
+/* ═══════════════════════════════════════════════════════════
+   SCANNER CONTROLS
+═══════════════════════════════════════════════════════════ */
+function toggleScanner() { Scanner.on ? Scanner.stop() : Scanner.start(); }
+function setScanMsg(m)    { document.getElementById('scan-msg').textContent = m; }
+
+/* ═══════════════════════════════════════════════════════════
+   ISBN LOOKUP
+═══════════════════════════════════════════════════════════ */
+function handleManualLookup() {
+  const v = document.getElementById('isbn-in').value.trim().replace(/[-\s]/g, '');
+  if (!v) { showToast('Enter an ISBN first', 'warning'); return; }
+  document.getElementById('isbn-in').value = '';
+  lookupISBN(v);
+}
+
+async function lookupISBN(rawIsbn) {
+  const isbn = rawIsbn.trim().replace(/[-\s]/g, '');
+  if (isbn.length < 10) { showToast('Invalid ISBN: ' + isbn, 'warning'); return; }
+
+  setScanMsg('Looking up ' + isbn + '…');
+  showLoad(true);
+
+  // Duplicate check
+  const dups = await DB.byISBN(isbn);
+  if (dups.length > 0) {
+    showLoad(false);
+    if (!confirm(`"${dups[0].title}" is already in your catalog.\nAdd a second copy?`)) {
+      setScanMsg('Ready — scan next book or type ISBN');
+      return;
+    }
+    showLoad(true);
+  }
+
+  let data = null;
+  try { data = await fetchGoogle(isbn); }       catch (_) {}
+  if (!data) {
+    try { data = await fetchOpenLibrary(isbn); } catch (_) {}
+  }
+  showLoad(false);
+
+  if (!data) {
+    data = { title: '', subtitle: '', authors: [], publisher: '', publishedDate: '',
+             description: '', pageCount: null, categories: [], thumbnail: '',
+             language: '', isbn10: '', isbn13: isbn.length === 13 ? isbn : '', listPrice: null };
+    showToast('Not found in databases — fill in manually', 'warning');
+  } else {
+    setScanMsg('Found: ' + data.title);
+  }
+
+  const now = new Date().toISOString();
+  const book = Object.assign(data, {
+    id: uid(), isbn,
+    location: '', boxNumber: null, customSubject: '',
+    notes: '', usedValue: null,
+    dateAdded: now, dateModified: now
+  });
+  openModal(book, true);
+}
+
+/* ═══════════════════════════════════════════════════════════
+   MODAL
+═══════════════════════════════════════════════════════════ */
+function openModal(book, isNew) {
+  curBook  = book;
+  curIsNew = isNew;
+
+  document.getElementById('m-header-title').textContent = book.title || 'New Book';
+
+  // Cover
+  const cv = document.getElementById('m-cover');
+  cv.innerHTML = book.thumbnail
+    ? `<img class="cover-img" src="${book.thumbnail}" alt="" onerror="this.parentNode.innerHTML='<div class=\\'cover-ph\\'>📖</div>'">`
+    : `<div class="cover-ph">📖</div>`;
+
+  // Text fields
+  document.getElementById('m-title').textContent =
+    book.title + (book.subtitle ? ': ' + book.subtitle : '');
+  document.getElementById('m-authors').textContent =
+    (book.authors || []).join(', ') || 'Author unknown';
+  document.getElementById('m-pub').textContent =
+    [book.publisher, book.publishedDate, book.pageCount ? book.pageCount + ' pp.' : '']
+      .filter(Boolean).join(' · ');
+
+  const desc = book.description || '';
+  document.getElementById('m-desc').textContent =
+    desc.length > 320 ? desc.slice(0, 320) + '…' : desc;
+
+  const cats = document.getElementById('m-cats');
+  cats.innerHTML = (book.categories || []).slice(0, 6)
+    .map(c => `<span class="ctag">${esc(c)}</span>`).join('');
+
+  // ISBN block
+  const isbns = [book.isbn10, book.isbn13, book.isbn]
+    .filter((v, i, a) => v && a.indexOf(v) === i).join(' / ');
+  document.getElementById('m-isbn-block').innerHTML =
+    `ISBN: ${esc(isbns || '—')}<br>` +
+    `Pages: ${book.pageCount || '—'}<br>` +
+    `Language: ${book.language || '—'}<br>` +
+    `Added: ${book.dateAdded ? new Date(book.dateAdded).toLocaleDateString() : '—'}`;
+
+  // Custom fields
+  setVal('f-loc',  book.location || '');
+  setVal('f-box',  book.boxNumber || '');
+  setVal('f-subj', book.customSubject || '');
+  setVal('f-notes',book.notes || '');
+  setVal('f-list', book.listPrice != null ? book.listPrice : '');
+  setVal('f-used', book.usedValue  != null ? book.usedValue  : '');
+
+  // Hide delete for new books
+  document.getElementById('m-del-btn').style.display = isNew ? 'none' : '';
+
+  document.getElementById('book-modal').classList.remove('hidden');
+  document.body.style.overflow = 'hidden';
+}
+
+function closeModal() {
+  document.getElementById('book-modal').classList.add('hidden');
+  document.body.style.overflow = '';
+  curBook = null;
+  if (document.getElementById('tab-scan').classList.contains('active'))
+    setScanMsg('Tap Camera to start scanning');
+}
+
+async function saveBook() {
+  if (!curBook) return;
+  curBook.location      = getVal('f-loc');
+  curBook.boxNumber     = getVal('f-box') ? parseInt(getVal('f-box')) : null;
+  curBook.customSubject = getVal('f-subj');
+  curBook.notes         = getVal('f-notes').trim();
+  curBook.listPrice     = getVal('f-list') !== '' ? parseFloat(getVal('f-list')) : null;
+  curBook.usedValue     = getVal('f-used') !== '' ? parseFloat(getVal('f-used')) : null;
+  curBook.dateModified  = new Date().toISOString();
+
+  try {
+    await DB.put(curBook);
+    const idx = allBooks.findIndex(b => b.id === curBook.id);
+    if (idx >= 0) allBooks[idx] = { ...curBook };
+    else          allBooks.push({ ...curBook });
+    updateCount();
+    renderCatalog();
+    closeModal();
+    showToast(curIsNew ? '✅ Book added!' : '✅ Book updated!', 'success');
+  } catch (e) {
+    showToast('Save failed: ' + e.message, 'error');
+  }
+}
+
+async function deleteCurrentBook() {
+  if (!curBook) return;
+  if (!confirm(`Delete "${curBook.title || 'this book'}"?\nThis cannot be undone.`)) return;
+  try {
+    await DB.del(curBook.id);
+    allBooks = allBooks.filter(b => b.id !== curBook.id);
+    updateCount(); renderCatalog(); closeModal();
+    showToast('Book deleted', 'info');
+  } catch (e) {
+    showToast('Delete failed: ' + e.message, 'error');
+  }
+}
+
+function openBookById(id) {
+  const b = allBooks.find(x => x.id === id);
+  if (b) openModal(b, false);
+}
+
+/* ═══════════════════════════════════════════════════════════
+   CATALOG RENDER
+═══════════════════════════════════════════════════════════ */
+function renderCatalog() {
+  const q    = (document.getElementById('search-in').value || '').toLowerCase().trim();
+  const fLoc = document.getElementById('fl-loc').value;
+  const fSub = document.getElementById('fl-subj').value;
+
+  let books = allBooks.filter(b => {
+    if (fLoc && b.location      !== fLoc) return false;
+    if (fSub && b.customSubject !== fSub) return false;
+    if (q) {
+      const hay = [b.title, ...(b.authors||[]), b.isbn, b.isbn13, b.isbn10, b.publisher]
+        .join(' ').toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  });
+
+  books.sort((a, b) => (b.dateAdded || '').localeCompare(a.dateAdded || ''));
+
+  document.getElementById('cat-count').textContent =
+    `${books.length} of ${allBooks.length} book${allBooks.length !== 1 ? 's' : ''}`;
+
+  const list = document.getElementById('cat-list');
+  if (!books.length) {
+    list.innerHTML = `<div class="empty">
+      <div class="eicon">${allBooks.length === 0 ? '📚' : '🔍'}</div>
+      <div>${allBooks.length === 0
+        ? 'No books yet — scan or type an ISBN!'
+        : 'No books match your filters.'}</div>
+    </div>`;
+    return;
+  }
+
+  list.innerHTML = books.map(b => `
+    <div class="bcard" onclick="openBookById('${esc(b.id)}')">
+      ${b.thumbnail
+        ? `<img class="bthumb" src="${esc(b.thumbnail)}" alt="" loading="lazy"
+               onerror="this.outerHTML='<div class=\\'bthumb-ph\\'>📖</div>'">`
+        : `<div class="bthumb-ph">📖</div>`}
+      <div class="binfo">
+        <div class="btitle">${esc(b.title || 'Untitled')}</div>
+        <div class="bauthor">${esc((b.authors||[]).join(', ') || 'Unknown Author')}</div>
+        <div class="btags">
+          ${b.location     ? `<span class="tag loc">${esc(b.location)}</span>`      : ''}
+          ${b.customSubject? `<span class="tag subj">${esc(b.customSubject)}</span>`: ''}
+          ${b.boxNumber    ? `<span class="tag box">Box ${b.boxNumber}</span>`       : ''}
+          ${b.usedValue != null ? `<span class="tag">$${b.usedValue.toFixed(2)}</span>` : ''}
+        </div>
+      </div>
+    </div>`).join('');
+}
+
+/* ═══════════════════════════════════════════════════════════
+   EXPORT
+═══════════════════════════════════════════════════════════ */
+function exportAllCSV() {
+  if (!allBooks.length) { showToast('No books to export', 'warning'); return; }
+  const hdr = ['ISBN','ISBN13','ISBN10','Title','Subtitle','Authors','Publisher',
+               'PublishedDate','PageCount','Language','APICategories',
+               'Location','BoxNumber','MySubject','ListPrice','UsedValue',
+               'Notes','DateAdded','DateModified'];
+  const rows = allBooks.map(b => [
+    b.isbn, b.isbn13||'', b.isbn10||'',
+    b.title, b.subtitle||'', (b.authors||[]).join('; '),
+    b.publisher||'', b.publishedDate||'',
+    b.pageCount||'', b.language||'',
+    (b.categories||[]).join('; '),
+    b.location||'', b.boxNumber||'',
+    b.customSubject||'',
+    b.listPrice != null ? b.listPrice.toFixed(2) : '',
+    b.usedValue != null ? b.usedValue.toFixed(2) : '',
+    b.notes||'',
+    b.dateAdded    ? new Date(b.dateAdded).toLocaleDateString()    : '',
+    b.dateModified ? new Date(b.dateModified).toLocaleDateString() : ''
+  ]);
+  dlCSV('book-catalog-' + ds() + '.csv', [hdr, ...rows]);
+}
+
+function exportISBNsCSV() {
+  if (!allBooks.length) { showToast('No books to export', 'warning'); return; }
+  const rows = [['ISBN','Title','Authors'],
+    ...allBooks.map(b => [b.isbn, b.title, (b.authors||[]).join('; ')])];
+  dlCSV('isbns-' + ds() + '.csv', rows);
+}
+
+function dlCSV(fname, rows) {
+  const csv = rows.map(r => r.map(csvQ).join(',')).join('\r\n');
+  const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+  const url  = URL.createObjectURL(blob);
+  const a    = Object.assign(document.createElement('a'), { href: url, download: fname });
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+  showToast(`Exported ${rows.length - 1} books`, 'success');
+}
+
+function csvQ(v) {
+  const s = String(v ?? '');
+  return (s.includes(',') || s.includes('"') || s.includes('\n'))
+    ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   IMPORT PRICING
+═══════════════════════════════════════════════════════════ */
+function onPricingFile() {
+  pricingFile = document.getElementById('pricing-file').files[0];
+  document.getElementById('pf-name').textContent =
+    pricingFile ? 'Selected: ' + pricingFile.name : '';
+}
+
+async function importPricing() {
+  if (!pricingFile) { showToast('Choose a CSV file first', 'warning'); return; }
+  const text = await pricingFile.text();
+  const rows = parseCSV(text);
+  if (rows.length < 2) { showToast('CSV looks empty', 'error'); return; }
+
+  const hdrs = rows[0].map(h => h.toLowerCase().replace(/[\s_-]/g,''));
+  const ci   = hdrs.findIndex(h => h.includes('isbn'));
+  const li   = hdrs.findIndex(h => h.includes('list') || h.includes('retail') || h === 'price');
+  const ui   = hdrs.findIndex(h => h.includes('used') || h.includes('buyback') || h.includes('market') || h.includes('value'));
+
+  if (ci < 0) { showToast('CSV must have an ISBN column', 'error'); return; }
+
+  showLoad(true);
+  let updated = 0;
+  for (let i = 1; i < rows.length; i++) {
+    const row  = rows[i];
+    const isbn = row[ci]?.trim().replace(/[-\s]/g, '');
+    if (!isbn) continue;
+    const matches = allBooks.filter(b =>
+      b.isbn === isbn || b.isbn13 === isbn || b.isbn10 === isbn);
+    for (const bk of matches) {
+      let changed = false;
+      if (li >= 0 && row[li]) { const v = parseFloat(row[li].replace(/[$,]/g,'')); if (!isNaN(v)) { bk.listPrice = v; changed = true; } }
+      if (ui >= 0 && row[ui]) { const v = parseFloat(row[ui].replace(/[$,]/g,'')); if (!isNaN(v)) { bk.usedValue = v; changed = true; } }
+      if (changed) { bk.dateModified = new Date().toISOString(); await DB.put(bk); updated++; }
+    }
+  }
+  showLoad(false);
+  showToast(`Updated ${updated} book${updated!==1?'s':''}`, updated > 0 ? 'success' : 'warning');
+  updateStats();
+}
+
+/* Minimal CSV parser — handles quoted fields and CRLF */
+function parseCSV(text) {
+  const rows=[]; let row=[], cur='', inQ=false;
+  for (let i=0; i<text.length; i++) {
+    const c=text[i];
+    if (inQ) {
+      if (c==='"' && text[i+1]==='"') { cur+='"'; i++; }
+      else if (c==='"') { inQ=false; }
+      else cur+=c;
+    } else if (c==='"') { inQ=true;
+    } else if (c===',') { row.push(cur); cur='';
+    } else if (c==='\n'||(c==='\r'&&text[i+1]==='\n')) {
+      if (c==='\r') i++;
+      row.push(cur); cur='';
+      if (row.some(x=>x)) rows.push(row); row=[];
+    } else cur+=c;
+  }
+  if (cur||row.length) { row.push(cur); if (row.some(x=>x)) rows.push(row); }
+  return rows;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   STATS
+═══════════════════════════════════════════════════════════ */
+function updateStats() {
+  const n    = allBooks.length;
+  const prcd = allBooks.filter(b => b.listPrice!=null||b.usedValue!=null).length;
+  const loc  = allBooks.filter(b => b.location).length;
+  const boxd = allBooks.filter(b => b.boxNumber!=null).length;
+  ['s-total','s-priced','s-located','s-boxed']
+    .forEach((id,i) => { document.getElementById(id).textContent = [n,prcd,loc,boxd][i]; });
+}
+
+function updateCount() {
+  document.getElementById('book-count').textContent =
+    allBooks.length + ' book' + (allBooks.length!==1?'s':'');
+}
+
+/* ═══════════════════════════════════════════════════════════
+   CLEAR ALL
+═══════════════════════════════════════════════════════════ */
+async function clearAllBooks() {
+  if (!allBooks.length) { showToast('Catalog is already empty', 'info'); return; }
+  if (!confirm(`Delete ALL ${allBooks.length} books?\n\nThis CANNOT be undone. Export a backup first if needed.`)) return;
+  if (!confirm('Are you absolutely sure? All book data will be lost.')) return;
+  try {
+    await DB.clear();
+    allBooks = [];
+    updateCount(); renderCatalog(); updateStats();
+    showToast('Catalog cleared', 'info');
+  } catch (e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+/* ═══════════════════════════════════════════════════════════
+   UTILITIES
+═══════════════════════════════════════════════════════════ */
+function uid()     { return Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
+function ds()      { return new Date().toISOString().slice(0,10); }
+function esc(s)    { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function getVal(id){ return document.getElementById(id).value; }
+function setVal(id,v){ document.getElementById(id).value = v; }
+function showLoad(b){ document.getElementById('loading').classList.toggle('hidden',!b); }
+
+let _tt = null;
+function showToast(msg, type='info', ms=3200) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = 'toast ' + type;
+  clearTimeout(_tt);
+  _tt = setTimeout(() => el.classList.add('hidden'), ms);
+}
+
+/* ═══════════════════════════════════════════════════════════
+   KEYBOARD
+═══════════════════════════════════════════════════════════ */
+document.getElementById('isbn-in').addEventListener('keydown', e => {
+  if (e.key === 'Enter') handleManualLookup();
+});
+
+/* ═══════════════════════════════════════════════════════════
+   GO
+═══════════════════════════════════════════════════════════ */
+document.addEventListener('DOMContentLoaded', init);
+</script>
+</body>
+</html>
