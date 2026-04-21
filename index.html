@@ -329,6 +329,36 @@
 
     .isbn-info-row { font-size: 13px; color: var(--text-muted); line-height: 1.9; }
 
+    /* Editable bib fields in modal header */
+    .bib-input {
+      width: 100%; background: transparent; border: none;
+      border-bottom: 1.5px solid var(--border); border-radius: 0;
+      padding: 2px 0 4px; outline: none; color: var(--text);
+      font-family: inherit; transition: border-color .2s;
+    }
+    .bib-input:focus { border-bottom-color: var(--primary-light); }
+    .bib-title  { font-size: 15px; font-weight: 700; }
+    .bib-author { font-size: 13px; color: var(--text-muted); }
+    .bib-pub    { font-size: 12px; color: var(--text-muted); }
+    .bib-input::placeholder { color: #bbb; font-weight: 400; }
+
+    /* LCCN lookup button (inline in label) */
+    .lccn-lookup-btn {
+      background: none; border: 1px solid var(--border); border-radius: 5px;
+      font-size: 11px; padding: 1px 6px; cursor: pointer; margin-left: 6px;
+      color: var(--primary-light); touch-action: manipulation;
+    }
+
+    /* Manual Entry bar */
+    #manual-entry-bar {
+      background: #111; padding: 6px 12px 10px; flex-shrink: 0;
+    }
+    #btn-manual {
+      width: 100%; background: none; border: 1px solid #444; color: #aaa;
+      padding: 8px; border-radius: 8px; font-size: 13px;
+      cursor: pointer; touch-action: manipulation;
+    }
+
     /* ── TOAST ── */
     #toast {
       position: fixed; z-index: 300;
@@ -387,6 +417,9 @@
       <button id="btn-go" onclick="handleManualLookup()">Go</button>
     </div>
     <div id="scan-msg">Tap Camera to start scanning</div>
+    <div id="manual-entry-bar">
+      <button id="btn-manual" onclick="openManualEntry()">✏️ Manual Entry (no ISBN)</button>
+    </div>
   </section>
 
   <!-- ─── CATALOG TAB ─── -->
@@ -490,13 +523,16 @@
     </div>
     <div class="mbody">
 
-      <!-- Cover + basic info -->
+      <!-- Cover + editable bibliographic fields -->
       <div class="bk-block">
         <div id="m-cover"></div>
-        <div class="bk-meta">
-          <div class="bk-title" id="m-title"></div>
-          <div class="bk-author" id="m-authors"></div>
-          <div class="bk-pub" id="m-pub"></div>
+        <div class="bk-meta" style="gap:5px;">
+          <input id="f-title" class="bib-input bib-title" placeholder="Title (required)" autocomplete="off">
+          <input id="f-authors" class="bib-input bib-author" placeholder="Author(s) — separate with ; " autocomplete="off">
+          <div style="display:flex;gap:5px;">
+            <input id="f-publisher" class="bib-input bib-pub" placeholder="Publisher" autocomplete="off" style="flex:1;">
+            <input id="f-pubdate" class="bib-input bib-pub" placeholder="Year" autocomplete="off" style="width:68px;">
+          </div>
         </div>
       </div>
 
@@ -529,7 +565,7 @@
             <label for="f-owner">Owner</label>
             <select id="f-owner">
               <option value="">— select —</option>
-              <option>ASP</option><option>TMH</option><option>borrowed</option>
+              <option>ASP</option><option>TMH</option><option>borrowed</option><option>DONATE</option>
             </select>
           </div>
           <div class="frow-m">
@@ -571,9 +607,13 @@
         </div>
       </div>
 
-      <!-- ── ISBN META ── -->
+      <!-- ── BOOK INFO ── -->
       <div class="fsec">
         <div class="fsec-title">Book Info</div>
+        <div class="frow-m">
+          <label for="f-lccn">Library of Congress # <button type="button" class="lccn-lookup-btn" onclick="lookupByLCCN()">🔍 Lookup</button></label>
+          <input type="text" id="f-lccn" placeholder="e.g. 84-6789 or 2003064612" autocomplete="off">
+        </div>
         <div class="isbn-info-row" id="m-isbn-block"></div>
       </div>
 
@@ -591,8 +631,8 @@
 <!-- ═══ TOAST ═══ -->
 <div id="toast" class="hidden"></div>
 
-<!-- html5-qrcode from CDN -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
+<!-- ZXing barcode library (better iPhone compatibility than html5-qrcode) -->
+<script src="https://unpkg.com/@zxing/browser@0.1.4/umd/index.min.js"></script>
 
 <script>
 'use strict';
@@ -699,6 +739,7 @@ async function fetchOpenLibrary(isbn) {
   const d = await r.json();
   const b = d[`ISBN:${isbn}`];
   if (!b) return null;
+  const lccnArr = b.identifiers?.lccn || [];
   return {
     title:       b.title || '',
     subtitle:    b.subtitle || '',
@@ -712,69 +753,88 @@ async function fetchOpenLibrary(isbn) {
     language:    '',
     isbn10: '',
     isbn13: isbn.length === 13 ? isbn : '',
+    lccn:   lccnArr[0] || '',
     listPrice: null
   };
 }
 
 /* ═══════════════════════════════════════════════════════════
-   SCANNER
-   Only accepts ISBN-13 (978xxxxxxxxxx or 979xxxxxxxxxx)
-   or ISBN-10 (9 digits + digit/X).
-   Price add-on barcodes (5 digits) and other codes are
-   silently ignored so the scanner keeps looking.
+   SCANNER  — @zxing/browser
+   Uses ZXing JS library (different decode algorithm from
+   html5-qrcode, generally more reliable on iPhone 15 Pro).
+   Only passes ISBN-13 (978/979) or ISBN-10 to lookupISBN;
+   price add-on barcodes (5-digit EAN-5) are silently ignored.
 ═══════════════════════════════════════════════════════════ */
 function looksLikeISBN(code) {
   const c = code.trim().replace(/[-\s]/g, '');
-  // ISBN-13: starts with 978 or 979, exactly 13 digits
-  if (/^97[89]\d{10}$/.test(c)) return true;
-  // ISBN-10: 9 digits followed by a digit or X
-  if (/^\d{9}[\dX]$/i.test(c)) return true;
+  if (/^97[89]\d{10}$/.test(c)) return true;       // ISBN-13
+  if (/^\d{9}[\dX]$/i.test(c)) return true;         // ISBN-10
   return false;
 }
 
 const Scanner = {
-  inst: null, on: false,
+  reader: null, controls: null, on: false,
 
   async start() {
     if (this.on) return;
     setScanMsg('Starting camera…');
     try {
-      this.inst = new Html5Qrcode('reader');
-      await this.inst.start(
-        { facingMode: 'environment' },
-        {
-          fps: 10,
-          qrbox: { width: 265, height: 115 },
-          aspectRatio: 1.77,
-          formatsToSupport: [
-            Html5QrcodeSupportedFormats.EAN_13,
-            Html5QrcodeSupportedFormats.EAN_8,
-            Html5QrcodeSupportedFormats.UPC_A,
-            Html5QrcodeSupportedFormats.UPC_E,
-            Html5QrcodeSupportedFormats.CODE_128
-          ]
-        },
-        code => {
-          if (!this.on) return;
-          // Ignore price add-ons and any non-ISBN barcodes
-          if (!looksLikeISBN(code)) return;
+      const hints = new Map();
+      const fmts = [
+        ZXingBrowser.BarcodeFormat.EAN_13,
+        ZXingBrowser.BarcodeFormat.EAN_8,
+        ZXingBrowser.BarcodeFormat.UPC_A,
+        ZXingBrowser.BarcodeFormat.UPC_E,
+        ZXingBrowser.BarcodeFormat.CODE_128
+      ];
+      hints.set(ZXingBrowser.DecodeHintType.POSSIBLE_FORMATS, fmts);
+      // TRY_HARDER makes it more patient with partially-obscured codes
+      hints.set(ZXingBrowser.DecodeHintType.TRY_HARDER, true);
+
+      this.reader = new ZXingBrowser.BrowserMultiFormatReader(hints, {
+        delayBetweenScanAttempts: 200   // 200ms ≈ 5fps — gives camera time to focus
+      });
+
+      // Get rear camera device id
+      const devices = await ZXingBrowser.BrowserCodeReader.listVideoInputDevices();
+      const rear = devices.find(d => /back|rear|environment/i.test(d.label)) || devices[devices.length - 1];
+      const deviceId = rear?.deviceId;
+
+      const videoEl = document.querySelector('#reader video') || (() => {
+        const v = document.createElement('video');
+        v.style.cssText = 'width:100%;height:100%;object-fit:cover;';
+        document.getElementById('reader').appendChild(v);
+        return v;
+      })();
+
+      this.controls = await this.reader.decodeFromVideoDevice(
+        deviceId, videoEl,
+        (result, err) => {
+          if (!result || !this.on) return;
+          const code = result.getText();
+          if (!looksLikeISBN(code)) return;   // ignore price add-ons etc.
           this.stop().then(() => lookupISBN(code));
-        },
-        () => {}
+        }
       );
+
       this.on = true;
       document.getElementById('btn-cam').textContent = '⏸ Pause';
       document.getElementById('scan-aim').style.display = 'flex';
-      setScanMsg('📷 Scanning — aim barcode at the box');
+      setScanMsg('📷 Scanning — aim the ISBN barcode at the box');
     } catch (err) {
       setScanMsg('Camera error: ' + (err.message || err));
+      console.error('Scanner error:', err);
     }
   },
 
   async stop() {
-    if (!this.on || !this.inst) return;
-    try { await this.inst.stop(); await this.inst.clear(); } catch (_) {}
-    this.inst = null; this.on = false;
+    if (!this.on) return;
+    try { this.controls?.stop(); } catch (_) {}
+    try { this.reader?.reset(); }  catch (_) {}
+    this.controls = null; this.reader = null; this.on = false;
+    // Clear video element
+    const v = document.querySelector('#reader video');
+    if (v) { v.srcObject = null; v.remove(); }
     document.getElementById('btn-cam').textContent = '▶ Camera';
     setScanMsg('Tap Camera to start scanning');
   }
@@ -879,6 +939,7 @@ async function lookupISBN(rawIsbn) {
   }
 
   const now = new Date().toISOString();
+  if (!data.lccn) data.lccn = '';
   const book = Object.assign(data, {
     id: uid(), isbn,
     location: '', boxNumber: null, owner: '', customSubject: '',
@@ -888,6 +949,56 @@ async function lookupISBN(rawIsbn) {
   openModal(book, true);
 }
 
+function openManualEntry() {
+  const now = new Date().toISOString();
+  const book = {
+    id: uid(), isbn: '', isbn13: '', isbn10: '', lccn: '',
+    title: '', subtitle: '', authors: [], publisher: '', publishedDate: '',
+    description: '', pageCount: null, categories: [], thumbnail: '',
+    language: '', listPrice: null,
+    location: '', boxNumber: null, owner: '', customSubject: '',
+    notes: '', usedValue: null,
+    dateAdded: now, dateModified: now
+  };
+  openModal(book, true);
+}
+
+async function lookupByLCCN() {
+  const lccn = getVal('f-lccn').trim();
+  if (!lccn) { showToast('Enter an LCCN first', 'warning'); return; }
+
+  showToast('Looking up LCCN…', 'info', 1500);
+  try {
+    const r = await fetch(`https://openlibrary.org/search.json?lccn=${encodeURIComponent(lccn)}&limit=1`);
+    const d = await r.json();
+    const doc = d.docs && d.docs[0];
+    if (!doc) { showToast('LCCN not found in Open Library', 'warning'); return; }
+
+    // Populate editable fields — only overwrite blanks so user edits aren't clobbered
+    const titleEl = document.getElementById('f-title');
+    if (!titleEl.value.trim()) titleEl.value = doc.title || '';
+
+    const authEl = document.getElementById('f-authors');
+    if (!authEl.value.trim() && doc.author_name && doc.author_name.length) {
+      authEl.value = doc.author_name.join('; ');
+    }
+
+    const pubEl = document.getElementById('f-publisher');
+    if (!pubEl.value.trim() && doc.publisher && doc.publisher.length) {
+      pubEl.value = doc.publisher[0];
+    }
+
+    const dateEl = document.getElementById('f-pubdate');
+    if (!dateEl.value.trim() && doc.first_publish_year) {
+      dateEl.value = String(doc.first_publish_year);
+    }
+
+    showToast('LCCN lookup filled in!', 'success');
+  } catch (e) {
+    showToast('LCCN lookup failed: ' + e.message, 'error');
+  }
+}
+
 /* ═══════════════════════════════════════════════════════════
    MODAL
 ═══════════════════════════════════════════════════════════ */
@@ -895,7 +1006,7 @@ function openModal(book, isNew) {
   curBook  = book;
   curIsNew = isNew;
 
-  document.getElementById('m-header-title').textContent = book.title || 'New Book';
+  document.getElementById('m-header-title').textContent = isNew ? 'New Book' : 'Book Details';
 
   // Cover
   const cv = document.getElementById('m-cover');
@@ -903,14 +1014,11 @@ function openModal(book, isNew) {
     ? `<img class="cover-img" src="${book.thumbnail}" alt="" onerror="this.parentNode.innerHTML='<div class=\\'cover-ph\\'>📖</div>'">`
     : `<div class="cover-ph">📖</div>`;
 
-  // Text fields
-  document.getElementById('m-title').textContent =
-    book.title + (book.subtitle ? ': ' + book.subtitle : '');
-  document.getElementById('m-authors').textContent =
-    (book.authors || []).join(', ') || 'Author unknown';
-  document.getElementById('m-pub').textContent =
-    [book.publisher, book.publishedDate, book.pageCount ? book.pageCount + ' pp.' : '']
-      .filter(Boolean).join(' · ');
+  // Editable bibliographic fields (pre-populated from API / stored data)
+  setVal('f-title',     book.title || '');
+  setVal('f-authors',   (book.authors || []).join('; '));
+  setVal('f-publisher', book.publisher || '');
+  setVal('f-pubdate',   book.publishedDate || '');
 
   const desc = book.description || '';
   document.getElementById('m-desc').textContent =
@@ -920,7 +1028,8 @@ function openModal(book, isNew) {
   cats.innerHTML = (book.categories || []).slice(0, 6)
     .map(c => `<span class="ctag">${esc(c)}</span>`).join('');
 
-  // ISBN block
+  // LCCN + ISBN block
+  setVal('f-lccn', book.lccn || '');
   const isbns = [book.isbn10, book.isbn13, book.isbn]
     .filter((v, i, a) => v && a.indexOf(v) === i).join(' / ');
   document.getElementById('m-isbn-block').innerHTML =
@@ -955,6 +1064,14 @@ function closeModal() {
 
 async function saveBook() {
   if (!curBook) return;
+  // Editable bibliographic fields
+  curBook.title         = getVal('f-title').trim();
+  const authStr         = getVal('f-authors').trim();
+  curBook.authors       = authStr ? authStr.split(';').map(a => a.trim()).filter(Boolean) : [];
+  curBook.publisher     = getVal('f-publisher').trim();
+  curBook.publishedDate = getVal('f-pubdate').trim();
+  curBook.lccn          = getVal('f-lccn').trim();
+  // Custom fields
   curBook.location      = getVal('f-loc');
   curBook.boxNumber     = getVal('f-box') ? parseInt(getVal('f-box')) : null;
   curBook.owner         = getVal('f-owner');
@@ -1056,12 +1173,12 @@ function renderCatalog() {
 ═══════════════════════════════════════════════════════════ */
 function exportAllCSV() {
   if (!allBooks.length) { showToast('No books to export', 'warning'); return; }
-  const hdr = ['ISBN','ISBN13','ISBN10','Title','Subtitle','Authors','Publisher',
+  const hdr = ['ISBN','ISBN13','ISBN10','LCCN','Title','Subtitle','Authors','Publisher',
                'PublishedDate','PageCount','Language','APICategories',
                'Location','BoxNumber','Owner','MySubject','ListPrice','UsedValue',
                'Notes','DateAdded','DateModified'];
   const rows = allBooks.map(b => [
-    b.isbn, b.isbn13||'', b.isbn10||'',
+    b.isbn, b.isbn13||'', b.isbn10||'', b.lccn||'',
     b.title, b.subtitle||'', (b.authors||[]).join('; '),
     b.publisher||'', b.publishedDate||'',
     b.pageCount||'', b.language||'',
@@ -1169,6 +1286,7 @@ async function restoreCatalog(mode) {
   const cISBN   = ci('isbn');
   const cISBN13 = ci('isbn13');
   const cISBN10 = ci('isbn10');
+  const cLCCN   = ci('lccn');
   const cTitle  = ci('title');
   const cSub    = ci('subtitle');
   const cAuth   = ci('authors');
@@ -1216,6 +1334,7 @@ async function restoreCatalog(mode) {
       isbn,
       isbn13:       g(row, cISBN13),
       isbn10:       g(row, cISBN10),
+      lccn:         g(row, cLCCN),
       title:        g(row, cTitle),
       subtitle:     g(row, cSub),
       authors:      authRaw ? authRaw.split('; ').map(a => a.trim()).filter(Boolean) : [],
