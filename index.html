@@ -631,8 +631,8 @@
 <!-- ═══ TOAST ═══ -->
 <div id="toast" class="hidden"></div>
 
-<!-- ZXing barcode library (better iPhone compatibility than html5-qrcode) -->
-<script src="https://unpkg.com/@zxing/browser@0.1.4/umd/index.min.js"></script>
+<!-- ZXing barcode library (self-contained UMD bundle, no peer deps required) -->
+<script src="https://unpkg.com/@zxing/library@0.18.6/umd/index.min.js"></script>
 
 <script>
 'use strict';
@@ -759,9 +759,8 @@ async function fetchOpenLibrary(isbn) {
 }
 
 /* ═══════════════════════════════════════════════════════════
-   SCANNER  — @zxing/browser
-   Uses ZXing JS library (different decode algorithm from
-   html5-qrcode, generally more reliable on iPhone 15 Pro).
+   SCANNER  — @zxing/library@0.18.6
+   Self-contained UMD bundle (no peer deps). Exposes ZXing global.
    Only passes ISBN-13 (978/979) or ISBN-10 to lookupISBN;
    price add-on barcodes (5-digit EAN-5) are silently ignored.
 ═══════════════════════════════════════════════════════════ */
@@ -773,7 +772,7 @@ function looksLikeISBN(code) {
 }
 
 const Scanner = {
-  reader: null, controls: null, on: false,
+  reader: null, on: false,
 
   async start() {
     if (this.on) return;
@@ -781,22 +780,21 @@ const Scanner = {
     try {
       const hints = new Map();
       const fmts = [
-        ZXingBrowser.BarcodeFormat.EAN_13,
-        ZXingBrowser.BarcodeFormat.EAN_8,
-        ZXingBrowser.BarcodeFormat.UPC_A,
-        ZXingBrowser.BarcodeFormat.UPC_E,
-        ZXingBrowser.BarcodeFormat.CODE_128
+        ZXing.BarcodeFormat.EAN_13,
+        ZXing.BarcodeFormat.EAN_8,
+        ZXing.BarcodeFormat.UPC_A,
+        ZXing.BarcodeFormat.UPC_E,
+        ZXing.BarcodeFormat.CODE_128
       ];
-      hints.set(ZXingBrowser.DecodeHintType.POSSIBLE_FORMATS, fmts);
+      hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, fmts);
       // TRY_HARDER makes it more patient with partially-obscured codes
-      hints.set(ZXingBrowser.DecodeHintType.TRY_HARDER, true);
+      hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
 
-      this.reader = new ZXingBrowser.BrowserMultiFormatReader(hints, {
-        delayBetweenScanAttempts: 200   // 200ms ≈ 5fps — gives camera time to focus
-      });
+      // Second arg is ms between scan attempts — 200ms ≈ 5fps, gives autofocus time to settle
+      this.reader = new ZXing.BrowserMultiFormatReader(hints, 200);
 
-      // Get rear camera device id
-      const devices = await ZXingBrowser.BrowserCodeReader.listVideoInputDevices();
+      // Get rear camera device id (instance method in @zxing/library@0.18)
+      const devices = await this.reader.listVideoInputDevices();
       const rear = devices.find(d => /back|rear|environment/i.test(d.label)) || devices[devices.length - 1];
       const deviceId = rear?.deviceId;
 
@@ -807,7 +805,12 @@ const Scanner = {
         return v;
       })();
 
-      this.controls = await this.reader.decodeFromVideoDevice(
+      this.on = true;
+      document.getElementById('btn-cam').textContent = '⏸ Pause';
+      document.getElementById('scan-aim').style.display = 'flex';
+      setScanMsg('📷 Scanning — aim the ISBN barcode at the box');
+
+      await this.reader.decodeFromVideoDevice(
         deviceId, videoEl,
         (result, err) => {
           if (!result || !this.on) return;
@@ -816,12 +819,8 @@ const Scanner = {
           this.stop().then(() => lookupISBN(code));
         }
       );
-
-      this.on = true;
-      document.getElementById('btn-cam').textContent = '⏸ Pause';
-      document.getElementById('scan-aim').style.display = 'flex';
-      setScanMsg('📷 Scanning — aim the ISBN barcode at the box');
     } catch (err) {
+      this.on = false;
       setScanMsg('Camera error: ' + (err.message || err));
       console.error('Scanner error:', err);
     }
@@ -829,9 +828,9 @@ const Scanner = {
 
   async stop() {
     if (!this.on) return;
-    try { this.controls?.stop(); } catch (_) {}
-    try { this.reader?.reset(); }  catch (_) {}
-    this.controls = null; this.reader = null; this.on = false;
+    this.on = false;
+    try { this.reader?.reset(); } catch (_) {}
+    this.reader = null;
     // Clear video element
     const v = document.querySelector('#reader video');
     if (v) { v.srcObject = null; v.remove(); }
