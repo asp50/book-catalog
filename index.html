@@ -720,14 +720,15 @@ async function fetchGoogle(isbn) {
 
   // Try English-restricted first — returns romanized author names for translated works
   // e.g. "Haruki Murakami" instead of "村上春樹"
+  const GKEY = 'AIzaSyAH-eFDbhRp1cpdgi8pQYow6vkWFHeUELI';
   let result = await _call(
-    `https://www.googleapis.com/books/v1/volumes?q=isbn:${isbn}&maxResults=1&langRestrict=en`
+    `https://www.googleapis.com/books/v1/volumes?q=isbn:${isbn}&maxResults=1&langRestrict=en&key=${GKEY}`
   );
 
   // Fall back to unrestricted if no English record found
   if (!result) {
     result = await _call(
-      `https://www.googleapis.com/books/v1/volumes?q=isbn:${isbn}&maxResults=1`
+      `https://www.googleapis.com/books/v1/volumes?q=isbn:${isbn}&maxResults=1&key=${GKEY}`
     );
   }
 
