@@ -490,6 +490,16 @@
     </div>
 
     <div class="xcard">
+      <h2>🔑 Google Books API Key</h2>
+      <p>Required for ISBN lookups. Stored only on this device — never sent anywhere except Google's Books API. <a href="https://console.cloud.google.com/" target="_blank" style="color:var(--accent);">Get a free key →</a></p>
+      <input type="text" id="api-key-input" placeholder="Paste your API key here…"
+             style="width:100%;padding:8px;margin:6px 0 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px;box-sizing:border-box;"
+             autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+      <button class="btn-p" onclick="saveApiKey()">Save Key</button>
+      <div id="api-key-status" style="font-size:12px;color:var(--text-muted);margin-top:6px;"></div>
+    </div>
+
+    <div class="xcard">
       <h2>⚠️ Danger Zone</h2>
       <p>Permanently delete ALL books from this catalog. This cannot be undone.</p>
       <button class="btn-s btn-danger" onclick="clearAllBooks()">Delete Entire Catalog…</button>
@@ -720,15 +730,16 @@ async function fetchGoogle(isbn) {
 
   // Try English-restricted first — returns romanized author names for translated works
   // e.g. "Haruki Murakami" instead of "村上春樹"
-  const GKEY = 'AIzaSyAH-eFDbhRp1cpdgi8pQYow6vkWFHeUELI';
+  const GKEY = localStorage.getItem('gBooksApiKey') || '';
+  const keyParam = GKEY ? `&key=${GKEY}` : '';
   let result = await _call(
-    `https://www.googleapis.com/books/v1/volumes?q=isbn:${isbn}&maxResults=1&langRestrict=en&key=${GKEY}`
+    `https://www.googleapis.com/books/v1/volumes?q=isbn:${isbn}&maxResults=1&langRestrict=en${keyParam}`
   );
 
   // Fall back to unrestricted if no English record found
   if (!result) {
     result = await _call(
-      `https://www.googleapis.com/books/v1/volumes?q=isbn:${isbn}&maxResults=1&key=${GKEY}`
+      `https://www.googleapis.com/books/v1/volumes?q=isbn:${isbn}&maxResults=1${keyParam}`
     );
   }
 
@@ -852,12 +863,61 @@ let restoreFile  = null;
 /* ═══════════════════════════════════════════════════════════
    INIT
 ═══════════════════════════════════════════════════════════ */
+/* ═══════════════════════════════════════════════════════════
+   API KEY MANAGEMENT
+═══════════════════════════════════════════════════════════ */
+function saveApiKey() {
+  const key = document.getElementById('api-key-input').value.trim();
+  if (!key) { showToast('Please paste a key first', 'warning'); return; }
+  localStorage.setItem('gBooksApiKey', key);
+  document.getElementById('api-key-input').value = '';
+  refreshApiKeyStatus();
+  showToast('API key saved!', 'success');
+}
+
+function refreshApiKeyStatus() {
+  const stored = localStorage.getItem('gBooksApiKey');
+  const el = document.getElementById('api-key-status');
+  if (!el) return;
+  if (stored) {
+    // Show only first 8 and last 4 chars for confirmation without exposing the full key
+    const masked = stored.slice(0, 8) + '••••••••••••' + stored.slice(-4);
+    el.textContent = '✅ Key stored: ' + masked;
+  } else {
+    el.textContent = '⚠️ No key stored — lookups will use the shared (rate-limited) pool.';
+  }
+}
+
+function promptForApiKey() {
+  // Show a one-time banner nudging the user to enter their key
+  const banner = document.createElement('div');
+  banner.id = 'key-banner';
+  banner.style.cssText = `
+    position:fixed; bottom:70px; left:12px; right:12px; z-index:900;
+    background:#1a2a1a; border:1px solid #4a7c4a; border-radius:10px;
+    padding:12px 14px; font-size:13px; color:#ccc; line-height:1.4;
+  `;
+  banner.innerHTML = `
+    <strong style="color:#7ec87e;">📖 One-time setup needed</strong><br>
+    To look up books by ISBN you need a free Google Books API key.<br>
+    Tap <strong>Export → 🔑 API Key</strong> to enter it, or
+    <a href="https://console.cloud.google.com/" target="_blank" style="color:#7ec87e;">get one here</a>.
+    <button onclick="document.getElementById('key-banner').remove()"
+      style="float:right;background:none;border:none;color:#888;font-size:16px;cursor:pointer;margin-top:-2px;">✕</button>
+  `;
+  document.body.appendChild(banner);
+}
+
 async function init() {
   await DB.init();
   allBooks = await DB.getAll();
   updateCount();
   renderCatalog();
   updateStats();
+  refreshApiKeyStatus();
+  if (!localStorage.getItem('gBooksApiKey')) {
+    setTimeout(promptForApiKey, 1200);  // slight delay so UI settles first
+  }
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('sw.js').catch(() => {});
   }
@@ -872,7 +932,8 @@ function showTab(name) {
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
   document.getElementById('tab-' + name).classList.add('active');
   if (name === 'catalog') renderCatalog();
-  if (name === 'export')  updateStats();
+  if (name === 'export') { refreshApiKeyStatus(); updateStats(); }
+  if (name === 'scan') setTimeout(focusIsbnInput, 100);
 }
 
 /* ═══════════════════════════════════════════════════════════
@@ -1054,12 +1115,23 @@ function openModal(book, isNew) {
   document.body.style.overflow = 'hidden';
 }
 
+function focusIsbnInput() {
+  // Keep cursor in the ISBN field for Bluetooth scanner use.
+  // Only focus when the scan tab is active and the modal is closed.
+  if (!document.getElementById('tab-scan').classList.contains('active')) return;
+  if (!document.getElementById('book-modal').classList.contains('hidden')) return;
+  const el = document.getElementById('isbn-in');
+  if (el) el.focus();
+}
+
 function closeModal() {
   document.getElementById('book-modal').classList.add('hidden');
   document.body.style.overflow = '';
   curBook = null;
-  if (document.getElementById('tab-scan').classList.contains('active'))
+  if (document.getElementById('tab-scan').classList.contains('active')) {
     setScanMsg('Tap Camera to start scanning');
+    setTimeout(focusIsbnInput, 150);  // refocus after modal animation settles
+  }
 }
 
 async function saveBook() {
@@ -1451,7 +1523,10 @@ document.getElementById('isbn-in').addEventListener('keydown', e => {
 /* ═══════════════════════════════════════════════════════════
    GO
 ═══════════════════════════════════════════════════════════ */
-document.addEventListener('DOMContentLoaded', init);
+document.addEventListener('DOMContentLoaded', () => {
+  init();
+  setTimeout(focusIsbnInput, 800);  // focus ISBN field on startup for BT scanner
+});
 </script>
 </body>
 </html>
