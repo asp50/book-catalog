@@ -596,9 +596,16 @@
         </div>
       </div>
 
-      <!-- ── PRICING ── -->
+      <!-- ── COPIES + PRICING ── -->
       <div class="fsec">
-        <div class="fsec-title">Pricing</div>
+        <div class="fsec-title">Copies &amp; Pricing</div>
+        <div class="two-col">
+          <div class="frow-m">
+            <label for="f-copies">Copies Owned</label>
+            <input type="number" id="f-copies" placeholder="1" min="1" step="1" inputmode="numeric" style="width:70px;">
+          </div>
+          <div class="frow-m" style="visibility:hidden;"></div>
+        </div>
         <div class="two-col">
           <div class="frow-m">
             <label for="f-list">List Price</label>
@@ -959,15 +966,26 @@ async function lookupISBN(rawIsbn) {
   setScanMsg('Looking up ' + isbn + '…');
   showLoad(true);
 
-  // Duplicate check
+  // Duplicate check — offer to increment copy count rather than creating a new record
   const dups = await DB.byISBN(isbn);
   if (dups.length > 0) {
     showLoad(false);
-    if (!confirm(`"${dups[0].title}" is already in your catalog.\nAdd a second copy?`)) {
+    const existing = dups[0];
+    const currentCopies = existing.copies || 1;
+    if (!confirm(`"${existing.title}" is already in your catalog (${currentCopies} cop${currentCopies===1?'y':'ies'}).\nIncrement copy count to ${currentCopies + 1}?`)) {
       setScanMsg('Ready — scan next book or type ISBN');
       return;
     }
-    showLoad(true);
+    // Increment copies and save — no need to do a full API lookup
+    existing.copies = currentCopies + 1;
+    existing.dateModified = new Date().toISOString();
+    await DB.put(existing);
+    const idx = allBooks.findIndex(b => b.id === existing.id);
+    if (idx >= 0) allBooks[idx] = { ...existing };
+    showToast(`✅ "${existing.title}" — now ${existing.copies} copies`, 'success');
+    setScanMsg('Ready — scan next book or type ISBN');
+    setTimeout(focusIsbnInput, 150);
+    return;
   }
 
   let data = null;
@@ -1003,6 +1021,7 @@ async function lookupISBN(rawIsbn) {
   if (!data.lccn) data.lccn = '';
   const book = Object.assign(data, {
     id: uid(), isbn,
+    copies: 1,
     location: '', boxNumber: null, owner: '', customSubject: '',
     notes: '', usedValue: null,
     dateAdded: now, dateModified: now
@@ -1017,6 +1036,7 @@ function openManualEntry() {
     title: '', subtitle: '', authors: [], publisher: '', publishedDate: '',
     description: '', pageCount: null, categories: [], thumbnail: '',
     language: '', listPrice: null,
+    copies: 1,
     location: '', boxNumber: null, owner: '', customSubject: '',
     notes: '', usedValue: null,
     dateAdded: now, dateModified: now
@@ -1105,6 +1125,7 @@ function openModal(book, isNew) {
   setVal('f-owner', book.owner || '');
   setVal('f-subj',  book.customSubject || '');
   setVal('f-notes', book.notes || '');
+  setVal('f-copies', book.copies || 1);
   setVal('f-list',  book.listPrice != null ? book.listPrice : '');
   setVal('f-used',  book.usedValue  != null ? book.usedValue  : '');
 
@@ -1149,6 +1170,7 @@ async function saveBook() {
   curBook.owner         = getVal('f-owner');
   curBook.customSubject = getVal('f-subj');
   curBook.notes         = getVal('f-notes').trim();
+  curBook.copies        = getVal('f-copies') !== '' ? Math.max(1, parseInt(getVal('f-copies'))) : 1;
   curBook.listPrice     = getVal('f-list') !== '' ? parseFloat(getVal('f-list')) : null;
   curBook.usedValue     = getVal('f-used') !== '' ? parseFloat(getVal('f-used')) : null;
   curBook.dateModified  = new Date().toISOString();
@@ -1235,6 +1257,7 @@ function renderCatalog() {
           ${b.customSubject ? `<span class="tag subj">${esc(b.customSubject)}</span>`  : ''}
           ${b.boxNumber     ? `<span class="tag box">Box ${b.boxNumber}</span>`        : ''}
           ${b.usedValue != null ? `<span class="tag">$${b.usedValue.toFixed(2)}</span>` : ''}
+          ${(b.copies||1) > 1  ? `<span class="tag">×${b.copies} copies</span>`        : ''}
         </div>
       </div>
     </div>`).join('');
@@ -1247,7 +1270,7 @@ function exportAllCSV() {
   if (!allBooks.length) { showToast('No books to export', 'warning'); return; }
   const hdr = ['ISBN','ISBN13','ISBN10','LCCN','Title','Subtitle','Authors','Publisher',
                'PublishedDate','PageCount','Language','APICategories',
-               'Location','BoxNumber','Owner','MySubject','ListPrice','UsedValue',
+               'Location','BoxNumber','Owner','MySubject','Copies','ListPrice','UsedValue',
                'Notes','DateAdded','DateModified'];
   const rows = allBooks.map(b => [
     b.isbn, b.isbn13||'', b.isbn10||'', b.lccn||'',
@@ -1258,6 +1281,7 @@ function exportAllCSV() {
     b.location||'', b.boxNumber||'',
     b.owner||'',
     b.customSubject||'',
+    b.copies || 1,
     b.listPrice != null ? b.listPrice.toFixed(2) : '',
     b.usedValue != null ? b.usedValue.toFixed(2) : '',
     b.notes||'',
@@ -1371,6 +1395,7 @@ async function restoreCatalog(mode) {
   const cBox    = ci('boxnumber');
   const cOwner  = ci('owner');        // -1 in older exports — that's fine
   const cSubj   = ci('mysubject');
+  const cCopies = ci('copies');       // -1 in older exports — defaults to 1
   const cList   = ci('listprice');
   const cUsed   = ci('usedvalue');
   const cNotes  = ci('notes');
@@ -1395,9 +1420,23 @@ async function restoreCatalog(mode) {
     const isbn = g(row, cISBN).replace(/[-\s]/g, '');
     if (!isbn) continue;
 
-    // Merge mode: skip ISBNs already in catalog
-    if (mode === 'merge' && allBooks.some(b => b.isbn === isbn || b.isbn13 === isbn)) {
-      skipped++; continue;
+    // Merge mode: if ISBN exists, take the higher copy count rather than skipping
+    if (mode === 'merge') {
+      const existing = allBooks.find(b => b.isbn === isbn || b.isbn13 === isbn);
+      if (existing) {
+        const importedCopies = g(row, cCopies) ? parseInt(g(row, cCopies)) : 1;
+        if (importedCopies > (existing.copies || 1)) {
+          existing.copies = importedCopies;
+          existing.dateModified = now;
+          await DB.put(existing);
+          const idx = allBooks.findIndex(b => b.id === existing.id);
+          if (idx >= 0) allBooks[idx] = { ...existing };
+          added++;  // count as updated
+        } else {
+          skipped++;
+        }
+        continue;
+      }
     }
 
     const authRaw = g(row, cAuth);
@@ -1421,6 +1460,7 @@ async function restoreCatalog(mode) {
       boxNumber:    g(row, cBox)  ? parseInt(g(row, cBox))  : null,
       owner:        g(row, cOwner),   // blank string if column absent — fine
       customSubject:g(row, cSubj),
+      copies:       g(row, cCopies) ? Math.max(1, parseInt(g(row, cCopies))) : 1,
       listPrice:    g(row, cList) ? parseFloat(g(row, cList)) : null,
       usedValue:    g(row, cUsed) ? parseFloat(g(row, cUsed)) : null,
       notes:        g(row, cNotes),
